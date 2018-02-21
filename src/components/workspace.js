@@ -20,7 +20,7 @@ import ReactDOM from 'react-dom';
 
 import { GlobalStore } from '..';
 import { setCameraAttrs, zoomArea } from '../actions/camera'
-import { selectDocument, toggleSelectDocument, transform2dSelectedDocuments, removeDocumentSelected } from '../actions/document';
+import { selectDocument, toggleSelectDocument, transform2dSelectedDocuments, removeDocumentSelected, cloneDocumentSelected } from '../actions/document';
 import { setWorkspaceAttrs } from '../actions/workspace';
 import { setSettingsAttrs } from '../actions/settings';
 
@@ -263,6 +263,12 @@ class FloatingControls extends React.Component {
         this.setMaxX = v => {
             this.props.dispatch(transform2dSelectedDocuments([1, 0, 0, 1, v - this.bounds.x2, 0]));
         }
+        this.setZeroX = dir => {
+            var x = -this.bounds.x1;
+            if (dir)
+                x -= this.bounds.x2 - this.bounds.x1;
+            this.props.dispatch(transform2dSelectedDocuments([1, 0, 0, 1, x, 0]));
+        }
         this.setSizeX = v => {
             if (v > 0 && this.bounds.x2 - this.bounds.x1 > 0) {
                 let s = v / (this.bounds.x2 - this.bounds.x1);
@@ -281,6 +287,12 @@ class FloatingControls extends React.Component {
         this.setMaxY = v => {
             this.props.dispatch(transform2dSelectedDocuments([1, 0, 0, 1, 0, v - this.bounds.y2]));
         }
+        this.setZeroY = dir => {
+            var y = -this.bounds.y1;
+            if (dir)
+                y -= this.bounds.y2 - this.bounds.y1;
+            this.props.dispatch(transform2dSelectedDocuments([1, 0, 0, 1, 0, y]));
+        }
         this.setSizeY = v => {
             if (v > 0 && this.bounds.y2 - this.bounds.y1 > 0) {
                 let s = v / (this.bounds.y2 - this.bounds.y1);
@@ -289,6 +301,14 @@ class FloatingControls extends React.Component {
                 else
                     this.scale(1, s);
             }
+        }
+        this.setCenterXY = v => {
+            let x = -this.bounds.x1;
+            let y = -this.bounds.y1;
+            let cx = (this.bounds.x2 - this.bounds.x1) / 2;
+            let cy = (this.bounds.y2 - this.bounds.y1) / 2;
+            this.props.dispatch(transform2dSelectedDocuments([1, 0, 0, 1, x - cx, y - cy]));
+
         }
 
         this.toolOptimize = (doc, scale, anchor = 'C') => {
@@ -399,6 +419,25 @@ class FloatingControls extends React.Component {
                                 <td>Size</td>
                                 <td></td>
                                 <td>Rot</td>
+                                <td rowSpan={3} className="origin-controls">
+                                    <table>
+                                    <tr>
+                                    <td><button className="btn btn-xs" onClick={ e => { this.setZeroX(true); this.setZeroY(false); } } title="Align northwest of origin">&#x2198;</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => this.setZeroY(false) } title="Align north of origin">&#x2193;</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => { this.setZeroX(false); this.setZeroY(false); } } title="Align northeast of origin">&#x2199;</button></td>
+                                    </tr>
+                                    <tr>
+                                    <td><button className="btn btn-xs" onClick={ e => this.setZeroX(true) } title="Align west of origin">&#x2192;</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => this.setCenterXY() } title="Center on origin">+</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => this.setZeroX(false) } title="Align east of origin">&#x2190;</button></td>
+                                    </tr>
+                                    <tr>
+                                    <td><button className="btn btn-xs" onClick={ e => { this.setZeroX(true); this.setZeroY(true); } } title="Align southwest of origin">&#x2197;</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => this.setZeroY(true) } title="Align south of origin">&#x2191;</button></td>
+                                    <td><button className="btn btn-xs" onClick={ e => { this.setZeroX(false); this.setZeroY(true); } } title="Align southeast of origin">&#x2196;</button></td>
+                                    </tr>
+                                    </table>
+                                </td>
                             </tr>
                             <tr>
                                 <td><span className="label label-danger">X</span></td>
@@ -618,6 +657,7 @@ class WorkspaceContent extends React.Component {
         super(props);
         this.bindings = [
             [['alt+del', 'meta+backspace'], this.removeSelected.bind(this)],
+            [['ctrl+d'], this.cloneSelected.bind(this)],
         ]
         this.drawDocsState = {};
         this.drawGcodeState = {};
@@ -655,6 +695,13 @@ class WorkspaceContent extends React.Component {
         if (this.props.mode === 'jog') return;
         if (this.props.documents.find((d) => (d.selected)))
             this.props.dispatch(removeDocumentSelected());
+    }
+
+    cloneSelected(e) {
+        e.preventDefault();
+        if (this.props.mode === 'jog') return;
+        if (this.props.documents.find((d) => (d.selected)))
+            this.props.dispatch(cloneDocumentSelected());
     }
 
     setCanvas(canvas) {
@@ -738,8 +785,8 @@ class WorkspaceContent extends React.Component {
         this.grid.draw(this.drawCommands, {
             perspective: this.camera.perspective, view: this.camera.view,
             width: this.props.settings.toolGridWidth, height: this.props.settings.toolGridHeight,
-            minor: this.props.settings.toolGridMinorSpacing,
-            major: this.props.settings.toolGridMajorSpacing,
+            minor: this.props.settings.toolGridMinorSpacing || 0.1,
+            major: this.props.settings.toolGridMajorSpacing || 1,
         });
         if (this.props.settings.showMachine)
             this.machineBounds.draw(this.drawCommands, {
@@ -1376,7 +1423,7 @@ class Workspace extends React.Component {
     }
 }
 Workspace = connect(
-    state => ({ camera: state.camera, gcode: state.gcode.content, workspace: state.workspace, settings: state.settings, enableVideo: (state.settings.toolVideoDevice !== null) }),
+    state => ({ camera: state.camera, gcode: state.gcode.content, workspace: state.workspace, settings: state.settings, enableVideo: ((state.settings.toolVideoDevice !== null) || (!!state.settings.toolWebcamUrl)) }),
     dispatch => ({
         dispatch,
         setG0Rate: v => dispatch(setWorkspaceAttrs({ g0Rate: v })),
